@@ -1,12 +1,13 @@
 package http
 
 import (
+	"strconv"
+	"sync"
+
 	"github.com/barrerajuanjose/item_deco/domain"
 	"github.com/barrerajuanjose/item_deco/marshaller"
 	"github.com/barrerajuanjose/item_deco/service"
 	"github.com/gin-gonic/gin"
-	"strconv"
-	"sync"
 )
 
 type ItemController interface {
@@ -14,16 +15,18 @@ type ItemController interface {
 }
 
 type itemController struct {
-	itemMarshaller marshaller.ItemMarshaller
-	itemService service.ItemService
-	userService service.UserService
+	itemMarshaller        marshaller.ItemMarshaller
+	itemService           service.ItemService
+	userService           service.UserService
+	paymentOptionsService service.PaymentOptionsService
 }
 
-func NewItemController(itemMarshaller marshaller.ItemMarshaller, itemService service.ItemService, userService service.UserService) ItemController {
+func NewItemController(itemMarshaller marshaller.ItemMarshaller, itemService service.ItemService, userService service.UserService, paymentOptionsService service.PaymentOptionsService) ItemController {
 	return &itemController{
-		itemMarshaller: itemMarshaller,
-		itemService: itemService,
-		userService: userService,
+		itemMarshaller:        itemMarshaller,
+		itemService:           itemService,
+		userService:           userService,
+		paymentOptionsService: paymentOptionsService,
 	}
 }
 
@@ -34,9 +37,11 @@ func (c itemController) Get(ctx *gin.Context) {
 	itemChan := make(chan *domain.Item, 1)
 	sellerChan := make(chan *domain.User, 1)
 	buyerChan := make(chan *domain.User, 1)
+	recommendedPaymentMethodChan := make(chan *domain.PaymentMethod, 1)
+	viewChan := make(chan *marshaller.ItemDto, 1)
 
 	var wg sync.WaitGroup
-	wg.Add(3)
+	wg.Add(4)
 
 	go func() {
 		defer wg.Done()
@@ -59,13 +64,25 @@ func (c itemController) Get(ctx *gin.Context) {
 			defer close(sellerChan)
 			sellerChan <- c.userService.GetUserById(item.SellerId)
 		}()
+
+		go func() {
+			defer wg.Done()
+			defer close(recommendedPaymentMethodChan)
+			recommendedPaymentMethodChan <- c.paymentOptionsService.GetRecommendedPaymentMethod(item.Id)
+		}()
 	}()
 
-	wg.Wait()
+	go func() {
+		defer close(viewChan)
+		wg.Wait()
 
-	itemDomain := <- itemChan
-	sellerDomain := <- sellerChan
-	buyerDomain := <- buyerChan
+		itemDomain := <-itemChan
+		sellerDomain := <-sellerChan
+		buyerDomain := <-buyerChan
+		recommendedPaymentMethod := <-recommendedPaymentMethodChan
 
-	ctx.JSON(200, c.itemMarshaller.GetView(itemDomain, sellerDomain, buyerDomain))
+		viewChan <- c.itemMarshaller.GetView(itemDomain, sellerDomain, buyerDomain, recommendedPaymentMethod)
+	}()
+
+	ctx.JSON(200, <-viewChan)
 }

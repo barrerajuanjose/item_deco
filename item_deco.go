@@ -15,7 +15,7 @@ func main() {
 		})
 	})
 
-	itemController := http.NewItemController(marshaller.NewItemMarshaller(), service.NewItemService(), service.NewUserService())
+	itemController := http.NewItemController(marshaller.NewItemMarshaller(), service.NewItemService(), service.NewUserService(), service.NewPaymentOptionsService())
 
 	r.GET("/items/:item_id", itemController.Get)
 
